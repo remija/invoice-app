@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: invoice
+          POSTGRES_PASSWORD: invoice_dev
+          POSTGRES_DB: invoice_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://invoice:invoice_dev@localhost:5432/invoice_test_db
+      AWS_REGION: eu-west-3
+      SQS_ENDPOINT: http://localhost:9324
+      COGNITO_USER_POOL_ID: test
+      COGNITO_CLIENT_ID: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx turbo db:generate
+
+      - name: Push DB schema
+        run: cd apps/api && npx prisma db push --skip-generate
+
+      - name: Lint
+        run: npx turbo lint
+
+      - name: Unit tests
+        run: npx turbo test
+
+      - name: Build
+        run: npx turbo build
