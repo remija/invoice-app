@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id               String   @id @default(cuid())
+  name             String
+  siren            String   @unique
+  siret            String
+  vatNumber        String?
+  address          Json     // {street, city, zip, country}
+  legalForm        String   // SARL, SAS, EI, micro-entrepreneur...
+  capital          String?
+  rcsCity          String?
+  subscriptionTier String   @default("free")
+  stripeCustomerId String?
+  cognitoUserId    String   @unique
+  invoices         Invoice[]
+  clients          Client[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Client {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  name            String
+  email           String?
+  siren           String?
+  siret           String?
+  vatNumber       String?
+  billingAddress  Json
+  deliveryAddress Json?
+  invoices        Invoice[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model Invoice {
+  id                String            @id @default(cuid())
+  organizationId    String
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  clientId          String
+  client            Client            @relation(fields: [clientId], references: [id])
+
+  number            String
+  type              InvoiceType
+  direction         Direction
+
+  issueDate         DateTime
+  dueDate           DateTime
+  paymentTerms      String?
+
+  operationCategory OperationCategory
+  vatOnDebits       Boolean           @default(false)
+
+  lineItems         LineItem[]
+  totalHt           Decimal
+  totalVat          Decimal
+  totalTtc          Decimal
+  vatDetails        Json
+
+  status            InvoiceStatus     @default(DRAFT)
+  format            InvoiceFormat?
+  paSubmissionId    String?
+  pdfUrl            String?
+  xmlUrl            String?
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  sentAt            DateTime?
+  paidAt            DateTime?
+
+  @@unique([organizationId, number])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model LineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal
+  unitPriceHt Decimal
+  vatRate     Decimal
+  vatAmount   Decimal
+  totalHt     Decimal
+  sortOrder   Int
+
+  @@index([invoiceId])
+}
+
+model DomainEvent {
+  id            String   @id @default(cuid())
+  aggregateType String
+  aggregateId   String
+  eventType     String
+  payload       Json
+  userId        String
+  occurredAt    DateTime @default(now())
+
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([occurredAt])
+}
+
+enum InvoiceType {
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum Direction {
+  OUTGOING
+  INCOMING
+}
+
+enum OperationCategory {
+  GOODS
+  SERVICES
+  MIXED
+}
+
+enum InvoiceFormat {
+  FACTURX
+  UBL
+  CII
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  DEPOSITED
+  RECEIVED
+  ACCEPTED
+  REFUSED
+  PAID
+}
