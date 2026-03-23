@@ -4,11 +4,10 @@
 French e-invoicing SaaS for micro-entrepreneurs. Monorepo with 3 apps.
 
 ## Stack
-- **API**: NestJS + Prisma + PostgreSQL + CQRS (`@nestjs/cqrs`)
+- **API**: NestJS + Prisma + PostgreSQL
 - **App**: React 18 (Vite) + Tailwind + React Router
 - **Marketing**: Next.js (App Router) + Tailwind
 - **Monorepo**: Turborepo with npm workspaces
-- **Queue**: AWS SQS (ElasticMQ locally)
 - **Auth**: AWS Cognito
 - **Tests**: Jest (backend unit) + Playwright (E2E)
 
@@ -32,24 +31,22 @@ cd apps/marketing && npm run dev  # Next.js :3001
 ```
 
 ## Architecture
-- **CQRS-lite**: Commands write + emit events, Queries read. No full event sourcing.
-- **Event Log**: `DomainEvent` table is append-only audit trail. Every mutation persists an event.
-- **SQS processors**: Async side effects (PDF gen, PA submission, email, e-reporting).
-- **PA connector**: Abstraction over Plateforme Agreee APIs (Iopole/B2Brouter).
+- **Plain services**: Each domain module has a service, controller, DTOs, and module file.
+- **Atomic audit trail**: Every mutation writes entity + DomainEvent in a single `prisma.$transaction`.
+- **DomainEvent table**: Append-only audit log (legal requirement for e-invoicing).
+- **No CQRS/EventBus**: Removed as premature. Will add SQS processors when async work is needed (Sprint 3+).
 
 ## Patterns
-- Each domain module has: `commands/`, `queries/`, `events/`, controller, module.
-- Command handlers: validate -> persist -> emit event -> log to DomainEvent.
-- Tests: mock Prisma + EventBus, test handler logic in isolation.
-- DTOs use `class-validator` decorators.
+- Service methods: validate -> $transaction(persist entity + audit event) -> return.
+- DTOs use `class-validator` decorators with `!` assertion for required fields.
+- Tests: mock Prisma (including $transaction) and test service logic in isolation.
 - Shared types in `packages/shared/`.
 
 ## Key files
 - `apps/api/prisma/schema.prisma` - Database schema
 - `apps/api/src/app.module.ts` - Root NestJS module
-- `apps/api/src/common/events/` - Event log infrastructure
-- `apps/api/src/common/sqs/` - SQS producer
-- `apps/api/src/organization/` - First CQRS module (reference pattern)
+- `apps/api/src/common/events/domain-event.entity.ts` - Event data type
+- `apps/api/src/organization/` - Reference module (service pattern)
 
 ## Documentation
 - `docs/PLAN.md` - Roadmap, sprints, architecture, grille tarifaire

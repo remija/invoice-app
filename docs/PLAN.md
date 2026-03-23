@@ -45,34 +45,32 @@ Monorepo Turborepo (npm workspaces)
 
 ---
 
-## 3. Architecture CQRS-lite + Event Log
+## 3. Architecture
 
 **Principes** :
 - Monolithe modulaire (pas de microservices)
-- Separation commandes/queries via `@nestjs/cqrs`
+- Services NestJS simples (pas de CQRS -- supprime car premature)
 - Table `DomainEvent` append-only pour l'audit trail reglementaire
-- Effets secondaires asynchrones via SQS (PDF, PA, email, e-reporting)
+- Chaque mutation ecrit l'entite + l'event d'audit dans une seule `$transaction` Prisma
+- SQS sera ajoute au Sprint 3 quand les traitements async seront necessaires
 
 **Flux type (creation facture)** :
 ```
-Controller -> CreateInvoiceCommand -> Handler
+Controller -> InvoiceService.create(userId, dto)
   1. Valide les donnees (mentions obligatoires, SIREN, etc.)
-  2. Persiste l'Invoice en DB
-  3. Emet InvoiceCreatedEvent
-     -> EventLogHandler : persiste dans DomainEvent (audit)
-     -> SqsHandler : publie sur SQS
-        -> PdfGenerationProcessor (async)
+  2. prisma.$transaction:
+     a. Persiste l'Invoice en DB
+     b. Persiste DomainEvent (audit trail)
+  3. Return invoice
 ```
 
-**Flux envoi** :
+**Flux envoi (Sprint 3+, avec SQS)** :
 ```
-SendInvoiceCommand -> Handler
-  1. DRAFT -> SENT
-  2. InvoiceSentEvent
-     -> EventLog (audit)
-     -> SQS -> PaSubmissionProcessor (soumet a la PA)
-     -> SQS -> EmailProcessor (envoie au client)
-  3. Webhook PA -> InvoiceDeposited/Accepted/Refused events
+Controller -> InvoiceService.send(userId, invoiceId)
+  1. $transaction: DRAFT -> SENT + DomainEvent
+  2. SQS -> PaSubmissionProcessor (soumet a la PA)
+  3. SQS -> EmailProcessor (envoie au client)
+  4. Webhook PA -> InvoiceDeposited/Accepted/Refused
 ```
 
 ---
@@ -106,21 +104,22 @@ Voir `apps/api/prisma/schema.prisma` pour le schema complet.
 
 ## 6. Roadmap par sprints
 
-### Sprint 1 : Fondations + CQRS -- TERMINE
+### Sprint 1 : Fondations -- TERMINE
 
 - [x] Init monorepo Turborepo (React Vite + NestJS + Next.js)
 - [x] Docker Compose (PostgreSQL + ElasticMQ)
 - [x] Prisma schema complet (Organization, Client, Invoice, LineItem, DomainEvent)
-- [x] Setup `@nestjs/cqrs` -- bus de commandes, queries, events
-- [x] Module `common/events` : DomainEvent entity + EventLogService
-- [x] Module `common/sqs` : producteur SQS
-- [x] Auth via Cognito (guard + decorator @CurrentUser)
-- [x] CRUD Organization via Commands/Queries (premier module CQRS)
-- [x] 12 tests unitaires Jest (handlers + event log)
+- [x] Audit trail atomique : entity + DomainEvent dans une seule $transaction
+- [x] Auth via Cognito (guard + decorator @CurrentUser + tests)
+- [x] CRUD Organization via service simple (create/findByUser/update)
+- [x] 12 tests unitaires Jest (service + auth guard)
 - [x] Landing page SEO (Next.js) avec capture email + pricing
 - [x] CI GitHub Actions (lint + tests + build)
 - [x] Package shared (types + DTOs)
 - [x] API client React (fetch wrapper avec auth)
+
+Note : CQRS (`@nestjs/cqrs`) et SQS ont ete retires lors d'une revue
+code car prematures a ce stade. Seront reintroduits au besoin (Sprint 3+).
 
 ### Sprint 2 : Coeur facturation CQRS -- A FAIRE
 

@@ -192,39 +192,31 @@ Chaque transition de statut est enregistree comme `DomainEvent` dans la table d'
 | Module | Fichiers | Description |
 | ------ | -------- | ----------- |
 | **Prisma** | `prisma/schema.prisma`, `src/common/prisma/` | Schema complet (6 modeles, 5 enums), service global |
-| **Event Log** | `src/common/events/` | `EventLogService` : persist, findByAggregate, findByEventType. Table `DomainEvent` append-only. |
-| **SQS** | `src/common/sqs/` | `SqsService` : producteur de messages SQS, configurable par queue |
+| **Audit trail** | `src/common/events/domain-event.entity.ts` | Type `DomainEventData`. Les events sont ecrits dans la meme `$transaction` que l'entite. |
 | **Auth** | `src/auth/` | `CognitoAuthGuard` (JWT Bearer), `@CurrentUser()` decorator |
-| **Organization** | `src/organization/` | Module CQRS complet : 2 commands (Create, Update), 1 query (Get), 2 events, 2 DTOs, 1 controller |
+| **Organization** | `src/organization/` | Service simple : create, findByUser, update. DTOs avec class-validator. |
 
-Structure CQRS de chaque module :
+Structure de chaque module :
 ```
 organization/
-├── commands/
-│   ├── create-organization.command.ts    # Donnees de la commande
-│   ├── create-organization.handler.ts    # Logique : valide -> persiste -> event -> audit
-│   ├── update-organization.command.ts
-│   └── update-organization.handler.ts
-├── queries/
-│   ├── get-organization.query.ts
-│   └── get-organization.handler.ts
-├── events/
-│   ├── organization-created.event.ts
-│   └── organization-updated.event.ts
 ├── dto/
-│   ├── create-organization.dto.ts        # Validation class-validator
+│   ├── create-organization.dto.ts    # Validation class-validator
 │   └── update-organization.dto.ts
-├── organization.controller.ts            # REST endpoints
-└── organization.module.ts                # Wiring NestJS
+├── organization.service.ts           # Logique metier + $transaction
+├── organization.controller.ts        # REST endpoints
+└── organization.module.ts            # Wiring NestJS
 ```
+
+Note : CQRS (`@nestjs/cqrs`) et SQS (`@aws-sdk/client-sqs`) ont ete
+retires apres revue code car prematures. L'architecture privilege la
+simplicite : service -> $transaction(entity + audit event).
 
 #### Tests (12 tests, tous passent)
 
 | Fichier | Tests | Ce qui est couvert |
 | ------- | ----- | ------------------ |
-| `test/organization/create-organization.handler.spec.ts` | 4 | Creation avec tous les champs, emission d'event, persistence audit, rejet SIREN duplique |
-| `test/organization/update-organization.handler.spec.ts` | 4 | Mise a jour, persistence audit, not found, verification propriete |
-| `test/common/event-log.service.spec.ts` | 4 | Persistence event, recherche par aggregate, recherche par type avec filtre date |
+| `test/organization/organization.service.spec.ts` | 7 | Create (avec audit transactionnel, rejet SIREN duplique), findByUser (ok, not found), update (avec audit, not found, no-op si vide) |
+| `test/auth/cognito-auth.guard.spec.ts` | 5 | Header manquant, schema non-Bearer, JWT malformed, base64 invalide, extraction payload valide |
 
 #### Frontend React (`apps/app/`)
 
@@ -247,7 +239,7 @@ organization/
 
 | Sprint | Contenu | Priorite |
 | ------ | ------- | -------- |
-| **Sprint 2** | CRUD factures CQRS, CRUD clients, lookup SIREN, validation mentions, numerotation, calcul TVA | Haute |
+| **Sprint 2** | CRUD factures + clients (services simples), lookup SIREN, validation mentions, numerotation, calcul TVA | Haute |
 | **Sprint 3** | Generateurs Factur-X/UBL/CII, validation EN16931, PDF processor | Haute |
 | **Sprint 4** | Connexion PA (Iopole), cycle de vie complet, reception factures | Haute |
 | **Sprint 5** | Stripe, gating tiers, emails SES, dashboard, deploy AWS | Haute |
@@ -280,14 +272,9 @@ invoice-app/
 │   │   │   ├── app.module.ts           # Module racine
 │   │   │   ├── common/
 │   │   │   │   ├── prisma/             # PrismaService (global)
-│   │   │   │   ├── events/             # EventLogService (audit)
-│   │   │   │   └── sqs/               # SqsService (queue)
-│   │   │   ├── auth/                   # CognitoAuthGuard
-│   │   │   └── organization/           # Module CQRS complet
-│   │   │       ├── commands/
-│   │   │       ├── queries/
-│   │   │       ├── events/
-│   │   │       └── dto/
+│   │   │   │   └── events/             # DomainEventData type
+│   │   │   ├── auth/                   # CognitoAuthGuard + tests
+│   │   │   └── organization/           # Service + controller + DTOs
 │   │   └── test/                       # 12 tests unitaires
 │   ├── app/                            # React (Vite) frontend
 │   │   └── src/
