@@ -2,14 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { OrganizationService } from '../../src/organization/organization.service';
 import { PrismaService } from '../../src/common/prisma/prisma.service';
-import { EventLogService } from '../../src/common/events/event-log.handler';
 import { CreateOrganizationDto } from '../../src/organization/dto/create-organization.dto';
 import { UpdateOrganizationDto } from '../../src/organization/dto/update-organization.dto';
 
 describe('OrganizationService', () => {
   let service: OrganizationService;
   let prisma: jest.Mocked<PrismaService>;
-  let eventLog: jest.Mocked<EventLogService>;
 
   const createDto: CreateOrganizationDto = {
     name: 'Mon Entreprise',
@@ -36,7 +34,23 @@ describe('OrganizationService', () => {
     updatedAt: new Date(),
   };
 
+  // Mock transaction client that mirrors prisma delegates
+  const mockTx = {
+    organization: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    domainEvent: {
+      create: jest.fn(),
+    },
+  };
+
   beforeEach(async () => {
+    // Reset all mocks
+    mockTx.organization.create.mockReset();
+    mockTx.organization.update.mockReset();
+    mockTx.domainEvent.create.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrganizationService,
@@ -45,16 +59,8 @@ describe('OrganizationService', () => {
           useValue: {
             organization: {
               findUnique: jest.fn(),
-              findFirst: jest.fn(),
-              create: jest.fn(),
-              update: jest.fn(),
             },
-          },
-        },
-        {
-          provide: EventLogService,
-          useValue: {
-            persist: jest.fn(),
+            $transaction: jest.fn((cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx)),
           },
         },
       ],
@@ -62,40 +68,32 @@ describe('OrganizationService', () => {
 
     service = module.get(OrganizationService);
     prisma = module.get(PrismaService);
-    eventLog = module.get(EventLogService);
   });
 
   describe('create', () => {
-    it('should create an organization with all fields', async () => {
+    it('should create organization and audit event in a transaction', async () => {
       (prisma.organization.findUnique as jest.Mock).mockResolvedValue(null);
-      (prisma.organization.create as jest.Mock).mockResolvedValue(mockOrganization);
+      mockTx.organization.create.mockResolvedValue(mockOrganization);
+      mockTx.domainEvent.create.mockResolvedValue({});
 
       const result = await service.create('user-123', createDto);
 
       expect(result).toEqual(mockOrganization);
-      expect(prisma.organization.create).toHaveBeenCalledWith({
+      expect(mockTx.organization.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'Mon Entreprise',
           siren: '123456789',
           cognitoUserId: 'user-123',
         }),
       });
-    });
-
-    it('should persist event in audit log', async () => {
-      (prisma.organization.findUnique as jest.Mock).mockResolvedValue(null);
-      (prisma.organization.create as jest.Mock).mockResolvedValue(mockOrganization);
-
-      await service.create('user-123', createDto);
-
-      expect(eventLog.persist).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(mockTx.domainEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
           aggregateType: 'Organization',
           aggregateId: 'org-1',
           eventType: 'OrganizationCreated',
           userId: 'user-123',
         }),
-      );
+      });
     });
 
     it('should reject duplicate SIREN', async () => {
@@ -104,7 +102,7 @@ describe('OrganizationService', () => {
       await expect(service.create('user-123', createDto)).rejects.toThrow(
         ConflictException,
       );
-      expect(prisma.organization.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
@@ -113,7 +111,6 @@ describe('OrganizationService', () => {
       (prisma.organization.findUnique as jest.Mock).mockResolvedValue(mockOrganization);
 
       const result = await service.findByUser('user-123');
-
       expect(result).toEqual(mockOrganization);
     });
 
@@ -127,32 +124,23 @@ describe('OrganizationService', () => {
   });
 
   describe('update', () => {
-    it('should update organization name', async () => {
+    it('should update organization and persist audit event in a transaction', async () => {
       const updatedOrg = { ...mockOrganization, name: 'Nouveau Nom' };
       (prisma.organization.findUnique as jest.Mock).mockResolvedValue(mockOrganization);
-      (prisma.organization.update as jest.Mock).mockResolvedValue(updatedOrg);
+      mockTx.organization.update.mockResolvedValue(updatedOrg);
+      mockTx.domainEvent.create.mockResolvedValue({});
 
       const dto: UpdateOrganizationDto = { name: 'Nouveau Nom' };
       const result = await service.update('user-123', dto);
 
       expect(result.name).toBe('Nouveau Nom');
-    });
-
-    it('should persist update event in audit log', async () => {
-      const updatedOrg = { ...mockOrganization, name: 'Nouveau Nom' };
-      (prisma.organization.findUnique as jest.Mock).mockResolvedValue(mockOrganization);
-      (prisma.organization.update as jest.Mock).mockResolvedValue(updatedOrg);
-
-      const dto: UpdateOrganizationDto = { name: 'Nouveau Nom' };
-      await service.update('user-123', dto);
-
-      expect(eventLog.persist).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(mockTx.domainEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
           aggregateType: 'Organization',
           eventType: 'OrganizationUpdated',
           payload: { name: 'Nouveau Nom' },
         }),
-      );
+      });
     });
 
     it('should throw NotFoundException if organization does not exist', async () => {
@@ -164,15 +152,14 @@ describe('OrganizationService', () => {
       );
     });
 
-    it('should return existing org without DB call if no fields to update', async () => {
+    it('should return existing org without transaction if no fields to update', async () => {
       (prisma.organization.findUnique as jest.Mock).mockResolvedValue(mockOrganization);
 
       const dto: UpdateOrganizationDto = {};
       const result = await service.update('user-123', dto);
 
       expect(result).toEqual(mockOrganization);
-      expect(prisma.organization.update).not.toHaveBeenCalled();
-      expect(eventLog.persist).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

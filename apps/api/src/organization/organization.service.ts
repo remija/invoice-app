@@ -5,16 +5,12 @@ import {
 } from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
-import { EventLogService } from '../common/events/event-log.handler';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 
 @Injectable()
 export class OrganizationService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly eventLog: EventLogService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(
     userId: string,
@@ -30,34 +26,38 @@ export class OrganizationService {
       );
     }
 
-    const organization = await this.prisma.organization.create({
-      data: {
-        name: dto.name,
-        siren: dto.siren,
-        siret: dto.siret,
-        vatNumber: dto.vatNumber,
-        address: { ...dto.address },
-        legalForm: dto.legalForm,
-        capital: dto.capital,
-        rcsCity: dto.rcsCity,
-        cognitoUserId: userId,
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({
+        data: {
+          name: dto.name,
+          siren: dto.siren,
+          siret: dto.siret,
+          vatNumber: dto.vatNumber,
+          address: { ...dto.address },
+          legalForm: dto.legalForm,
+          capital: dto.capital,
+          rcsCity: dto.rcsCity,
+          cognitoUserId: userId,
+        },
+      });
 
-    await this.eventLog.persist({
-      aggregateType: 'Organization',
-      aggregateId: organization.id,
-      eventType: 'OrganizationCreated',
-      payload: {
-        name: organization.name,
-        siren: organization.siren,
-        siret: organization.siret,
-        legalForm: organization.legalForm,
-      },
-      userId,
-    });
+      await tx.domainEvent.create({
+        data: {
+          aggregateType: 'Organization',
+          aggregateId: organization.id,
+          eventType: 'OrganizationCreated',
+          payload: {
+            name: organization.name,
+            siren: organization.siren,
+            siret: organization.siret,
+            legalForm: organization.legalForm,
+          },
+          userId,
+        },
+      });
 
-    return organization;
+      return organization;
+    });
   }
 
   async findByUser(userId: string): Promise<Organization> {
@@ -97,19 +97,23 @@ export class OrganizationService {
       return existing;
     }
 
-    const organization = await this.prisma.organization.update({
-      where: { id: existing.id },
-      data,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.update({
+        where: { id: existing.id },
+        data,
+      });
 
-    await this.eventLog.persist({
-      aggregateType: 'Organization',
-      aggregateId: organization.id,
-      eventType: 'OrganizationUpdated',
-      payload: data,
-      userId,
-    });
+      await tx.domainEvent.create({
+        data: {
+          aggregateType: 'Organization',
+          aggregateId: organization.id,
+          eventType: 'OrganizationUpdated',
+          payload: data,
+          userId,
+        },
+      });
 
-    return organization;
+      return organization;
+    });
   }
 }
