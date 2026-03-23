@@ -175,16 +175,14 @@ OIDC federation between GitHub Actions and AWS (no long-lived AWS access keys):
 
 | Secret | Usage |
 |---|---|
-| `AWS_ACCOUNT_ID` | ECR login |
 | `AWS_DEPLOY_ROLE_ARN` | OIDC assume role |
-| `VITE_API_URL` | React app build |
 | `VITE_COGNITO_USER_POOL_ID` | React app build |
 | `VITE_COGNITO_CLIENT_ID` | React app build |
 
 ## Code Changes Required
 
 1. **`apps/api/Dockerfile`** — Multi-stage Docker build for NestJS
-2. **`apps/api/src/health.controller.ts`** — `GET /api/health` endpoint for ALB health checks
+2. **`apps/api/src/health/health.controller.ts`** — `GET /health` endpoint for ALB health checks
 3. **`apps/marketing/next.config.js`** — Add `output: 'export'` for static generation
 4. **`apps/app/src/lib/api.ts`** — Use `VITE_API_URL` env var instead of relative paths
 5. **`.github/workflows/deploy-api.yml`** — API deployment workflow
