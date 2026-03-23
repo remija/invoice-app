@@ -77,8 +77,9 @@ A dedicated domain will replace `remi-jacquart.dev` later.
 
 **Environment variables:**
 - Injected via ECS Task Definition
-- `DATABASE_URL`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `NODE_ENV`
-- DB password stored in SSM Parameter Store (free), referenced as secret in task def
+- `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `NODE_ENV`
+- `DATABASE_URL` stored as a SecureString in SSM Parameter Store (contains the password), injected as a secret in the task definition
+- Other secrets also in SSM Parameter Store (free)
 
 ### 2. App (React) — S3 + CloudFront
 
@@ -202,9 +203,9 @@ Resources to create manually before first deployment:
 6. **ALB:** Application Load Balancer, target group, HTTPS listener
 7. **S3:** 2 buckets (app, marketing), private, OAC configured
 8. **CloudFront:** 2 distributions with OAC, custom error responses for SPA
-9. **ACM:** 3 certificates (must be in us-east-1 for CloudFront, eu-west-3 for ALB)
+9. **ACM:** 3 certificates — **important: CloudFront requires certs in `us-east-1`**, ALB cert must be in `eu-west-3`
 10. **Cognito:** User Pool + App Client in eu-west-3
-11. **SSM Parameter Store:** DB password, other secrets
+11. **SSM Parameter Store:** `DATABASE_URL` (SecureString), other secrets
 12. **IAM:** OIDC provider + deploy role for GitHub Actions
 13. **Route 53 / DNS:** CNAME records pointing subdomains to ALB and CloudFront distributions
 
