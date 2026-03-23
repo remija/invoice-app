@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { EventLogService } from './event-log.handler';
+import { EventLogService } from './event-log.service';
 
 @Global()
 @Module({

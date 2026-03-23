@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { EventLogService } from '../../src/common/events/event-log.handler';
+import { EventLogService } from '../../src/common/events/event-log.service';
 import { PrismaService } from '../../src/common/prisma/prisma.service';
 
 describe('EventLogService', () => {
