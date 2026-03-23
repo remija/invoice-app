@@ -84,7 +84,7 @@ export class OrganizationService {
       throw new NotFoundException('Organization not found');
     }
 
-    const data: Record<string, string | object> = {};
+    const data: Record<string, string | number | object> = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.siret !== undefined) data.siret = dto.siret;
     if (dto.vatNumber !== undefined) data.vatNumber = dto.vatNumber;

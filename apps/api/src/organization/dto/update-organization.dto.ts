@@ -1,5 +1,6 @@
 import {
   IsString,
+  IsNumber,
   IsOptional,
   ValidateNested,
   Matches,
@@ -38,8 +39,8 @@ export class UpdateOrganizationDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsString()
-  capital?: string;
+  @IsNumber()
+  capital?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

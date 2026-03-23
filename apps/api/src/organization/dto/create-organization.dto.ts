@@ -1,6 +1,7 @@
 import {
   IsString,
   IsOptional,
+  IsNumber,
   ValidateNested,
   Length,
   Matches,
@@ -57,10 +58,10 @@ export class CreateOrganizationDto {
   @IsString()
   vatNumber?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: 1000 })
   @IsOptional()
-  @IsString()
-  capital?: string;
+  @IsNumber()
+  capital?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

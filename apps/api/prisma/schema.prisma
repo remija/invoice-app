@@ -11,11 +11,11 @@ model Organization {
   id               String   @id @default(cuid())
   name             String
   siren            String   @unique
-  siret            String
+  siret            String   @unique
   vatNumber        String?
   address          Json     // {street, city, zip, country}
   legalForm        String   // SARL, SAS, EI, micro-entrepreneur...
-  capital          String?
+  capital          Decimal?
   rcsCity          String?
   subscriptionTier String   @default("free")
   stripeCustomerId String?
@@ -80,9 +80,8 @@ model Invoice {
   paidAt            DateTime?
 
   @@unique([organizationId, number])
-  @@index([organizationId])
+  @@index([organizationId, status])
   @@index([clientId])
-  @@index([status])
 }
 
 model LineItem {
