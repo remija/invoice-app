@@ -51,6 +51,10 @@ cd apps/marketing && npm run dev  # Next.js :3001
 - `apps/api/src/common/sqs/` - SQS producer
 - `apps/api/src/organization/` - First CQRS module (reference pattern)
 
+## Documentation
+- `docs/PLAN.md` - Roadmap, sprints, architecture, grille tarifaire
+- `docs/SPECS.md` - Specifications fonctionnelles, exigences legales, etat de l'implementation
+
 ## Conventions
 - Language: code in English, UI text in French
 - SIREN: 9 digits, SIRET: 14 digits
