@@ -72,7 +72,7 @@ A dedicated domain will replace `remi-jacquart.dev` later.
 **Networking:**
 - ALB in front of ECS, public-facing
 - HTTPS via ACM certificate on `invoice-api.remi-jacquart.dev`
-- Health check endpoint: `GET /api/health`
+- Health check endpoint: `GET /health` (no global prefix in NestJS app)
 - Security group: ALB allows inbound 443, ECS allows inbound only from ALB SG
 
 **Environment variables:**
