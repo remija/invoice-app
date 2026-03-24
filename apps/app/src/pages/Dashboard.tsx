@@ -6,7 +6,7 @@ export function Dashboard() {
           Facture.dev
         </h1>
         <p className="text-lg text-gray-600">
-          Facturation electronique pour micro-entrepreneurs
+          Facturation électronique pour micro-entrepreneurs
         </p>
       </div>
     </div>
