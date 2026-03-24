@@ -6,7 +6,7 @@
 
 **Architecture:** ECS Fargate Spot behind ALB for the NestJS API. Two S3+CloudFront distributions for the static frontends. RDS PostgreSQL in private subnet. Cognito for auth. OIDC federation for GitHub Actions. All infra created manually via AWS console.
 
-**Tech Stack:** AWS Console (eu-west-3 default, us-east-1 for CloudFront certs), AWS CLI (for initial Docker image push), GitHub Settings UI.
+**Tech Stack:** AWS Console (eu-west-3 default, us-east-1 for CloudFront certs), GitHub Settings UI.
 
 **Spec:** `docs/superpowers/specs/2026-03-23-aws-deployment-design.md`
 
@@ -54,7 +54,7 @@ Task 4  → Cognito User Pool + App Client
 Task 5  → SSM Parameter Store — Cognito values
 Task 6  → RDS PostgreSQL
 Task 7  → SSM Parameter Store — DATABASE_URL
-Task 8  → ECR + Initial Image Push
+Task 8  → ECR Repository (repo seulement, pas de push manuel)
 Task 9  → IAM: ECS Task Execution Role
 Task 10 → IAM: GitHub Actions OIDC Provider + Deploy Role
 Task 11 → ALB (Target Group + Listeners)
@@ -330,11 +330,11 @@ Region: `eu-west-3` — navigate to **Systems Manager** → **Parameter Store**
 
 ---
 
-### Task 8: ECR Repository + Initial Image Push
+### Task 8: ECR Repository
 
 Region: `eu-west-3` — navigate to **ECR**
 
-#### Create Repository
+> Pas besoin de push manuel. Le service ECS sera créé avec `desired count: 0` (Task 12), donc ECS ne tentera pas de puller l'image avant le premier déploiement GitHub Actions (Task 17).
 
 - [ ] **Step 1:** **Repositories** → **Create repository**
   - Visibility: **Private**
@@ -343,34 +343,6 @@ Region: `eu-west-3` — navigate to **ECR**
   - Leave all other settings default
   - Click **Create repository**
 - [ ] **Step 2:** Note the full URI: `<ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/invoice-api`
-
-#### Push Initial Image (from your local machine)
-
-This is required so ECS has an image to pull when creating the service. Run these commands from the repo root.
-
-- [ ] **Step 3:** Authenticate Docker to ECR:
-  ```bash
-  aws ecr get-login-password --region eu-west-3 | \
-    docker login --username AWS --password-stdin \
-    <ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com
-  ```
-  Expected: `Login Succeeded`
-
-- [ ] **Step 4:** Build the Docker image:
-  ```bash
-  docker build -f apps/api/Dockerfile -t invoice-api:latest .
-  ```
-  Expected: Build succeeds
-
-- [ ] **Step 5:** Tag and push to ECR:
-  ```bash
-  docker tag invoice-api:latest \
-    <ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/invoice-api:latest
-
-  docker push \
-    <ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/invoice-api:latest
-  ```
-  Expected: Layer pushes complete, `latest` tag visible in ECR console
 
 ---
 
@@ -660,7 +632,7 @@ Region: `eu-west-3` — navigate to **ECS**
     - Remove `FARGATE` if it was auto-added
   - Task definition: `invoice-api` (revision 1)
   - Service name: `invoice-api-service`
-  - Desired tasks: 1
+  - Desired tasks: **0** ← l'image n'existe pas encore dans ECR ; elle sera pushée par GitHub Actions en Task 17
 - [ ] **Step 9:** Networking:
   - VPC: `invoice-vpc`
   - Subnets: select both **public** subnets (ECS runs in public subnet, no NAT Gateway needed)
@@ -671,13 +643,9 @@ Region: `eu-west-3` — navigate to **ECS**
   - Load balancer: `invoice-alb`
   - Listener: `443:HTTPS`
   - Target group: `invoice-api-tg`
-- [ ] **Step 11:** Click **Create** → wait ~3 min for service to reach **1/1 running**
+- [ ] **Step 11:** Click **Create** → le service apparaît avec **0/0 running** — c'est attendu.
 
-**Verify:**
-- Service shows 1 running task
-- Target group shows the task IP as **healthy** in the **Targets** tab
-- Test: `curl https://invoice-api.remi-jacquart.dev/health` → `{"status":"ok"}`
-  (only works after Task 15 DNS records are added)
+**Verify:** Le service `invoice-api-service` existe dans le cluster `invoice-cluster`, statut **Active**, desired count 0. Aucune task ne tente de démarrer.
 
 ---
 
@@ -823,41 +791,46 @@ Navigate to your GitHub repository → **Settings** → **Secrets and variables*
 
 ### Task 17: First Deployment & Smoke Test
 
-All infrastructure is in place. Trigger the three GitHub Actions workflows.
+Toute l'infrastructure est en place. Déclencher les 3 workflows GitHub Actions.
 
 #### Trigger Deployments
 
-- [ ] **Step 1:** Go to your GitHub repo → **Actions** tab
-- [ ] **Step 2:** Run **Deploy Marketing** manually:
-  - Click **Deploy Marketing** → **Run workflow** → **Run workflow**
-  - Wait for it to succeed (green check)
-- [ ] **Step 3:** Run **Deploy App** manually:
-  - Click **Deploy App** → **Run workflow** → **Run workflow**
-  - Wait for it to succeed
-
-> The Deploy API workflow was already triggered by the existing code commits. The ECS service is already running from the manually pushed image (Task 8). A re-deploy is optional unless you want to verify the full CI pipeline.
+- [ ] **Step 1:** Aller sur le repo GitHub → onglet **Actions**
+- [ ] **Step 2:** Lancer **Deploy API** en premier (il doit push l'image avant que l'API puisse démarrer) :
+  - Cliquer **Deploy API** → **Run workflow** → **Run workflow**
+  - Attendre le succès (coche verte) — le workflow build + push l'image dans ECR et met à jour la task definition
+- [ ] **Step 3:** Passer le service ECS à `desired count: 1` :
+  - **ECS** → `invoice-cluster` → **Services** → `invoice-api-service` → **Update**
+  - Desired tasks : **1** → **Update**
+  - Attendre ~2 min que la task atteigne le statut **Running** et que la target group la marque **healthy**
+- [ ] **Step 4:** Lancer **Deploy Marketing** :
+  - Cliquer **Deploy Marketing** → **Run workflow** → **Run workflow**
+  - Attendre le succès
+- [ ] **Step 5:** Lancer **Deploy App** :
+  - Cliquer **Deploy App** → **Run workflow** → **Run workflow**
+  - Attendre le succès
 
 #### Smoke Tests
 
-- [ ] **Step 4:** Test the API health endpoint:
+- [ ] **Step 6:** Test the API health endpoint:
   ```bash
   curl https://invoice-api.remi-jacquart.dev/health
   ```
   Expected: `{"status":"ok"}`
 
-- [ ] **Step 5:** Test the marketing site:
+- [ ] **Step 7:** Test the marketing site:
   Open `https://invoice-marketing.remi-jacquart.dev` in a browser.
   Expected: Landing page loads with HTTPS, no mixed content warnings.
 
-- [ ] **Step 6:** Test the React app:
+- [ ] **Step 8:** Test the React app:
   Open `https://invoice-app.remi-jacquart.dev` in a browser.
   Expected: "Facture.dev" dashboard loads.
 
-- [ ] **Step 7:** Test SPA routing (React Router):
+- [ ] **Step 9:** Test SPA routing (React Router):
   Navigate to `https://invoice-app.remi-jacquart.dev/nonexistent-route`
   Expected: React app loads (not a 404 error) — confirms the CloudFront custom error response is working.
 
-- [ ] **Step 8:** Verify HTTPS redirect:
+- [ ] **Step 10:** Verify HTTPS redirect:
   ```bash
   curl -I http://invoice-api.remi-jacquart.dev/health
   ```
@@ -876,7 +849,7 @@ All infrastructure is in place. Trigger the three GitHub Actions workflows.
 | 5 | SSM — Cognito params | 3 min |
 | 6 | RDS PostgreSQL | 10 min setup + 10 min wait |
 | 7 | SSM — DATABASE_URL | 2 min |
-| 8 | ECR + initial image push | 10 min |
+| 8 | ECR repository | 2 min |
 | 9 | IAM ECS Task Execution Role | 5 min |
 | 10 | IAM OIDC + GitHub deploy role | 10 min |
 | 11 | ALB + target group | 10 min |
