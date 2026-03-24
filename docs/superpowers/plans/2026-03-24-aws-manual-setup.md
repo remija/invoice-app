@@ -509,6 +509,18 @@ Region: `eu-west-3` — navigate to **App Runner**
 
 > App Runner démarre automatiquement un nouveau déploiement à chaque push du tag `:latest` dans ECR. Pas de gestion de cluster ni de task definition.
 
+> ⚠️ **Pré-requis : une image doit exister dans ECR avant de créer le service.** Suivre les étapes 12a ci-dessous pour pousser l'image initiale, puis revenir ici.
+
+#### Étape 12a — Pousser l'image initiale via GitHub Actions
+
+- [ ] **Step 12a-1:** GitHub → repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+  - Name: `AWS_DEPLOY_ROLE_ARN`
+  - Value: `arn:aws:iam::<ACCOUNT_ID>:role/github-actions-deploy`
+  - Click **Add secret**
+- [ ] **Step 12a-2:** Onglet **Actions** → **Deploy API** → **Run workflow** → **Run workflow**
+  - Attendre la coche verte (~3–5 min)
+  - **Verify :** ECR → `invoice-api` → un tag `:latest` et un tag `:<sha>` apparaissent
+
 #### Créer le service
 
 - [ ] **Step 1:** **App Runner** → **Services** → **Create service**
@@ -709,8 +721,7 @@ Expected: each should resolve to the respective AWS endpoint.
 
 Navigate to your GitHub repository → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 
-- [ ] **Step 1:** Secret: `AWS_DEPLOY_ROLE_ARN`
-  - Value: `arn:aws:iam::<ACCOUNT_ID>:role/github-actions-deploy`
+- [ ] **Step 1:** ~~Secret `AWS_DEPLOY_ROLE_ARN`~~ — **déjà ajouté en Task 12a**. Vérifier qu'il est bien présent.
 
 - [ ] **Step 2:** Secret: `APP_CLOUDFRONT_DISTRIBUTION_ID`
   - Value: CloudFront Distribution ID for the App (from Task 14 Step 8, format: `EXXXXXXXXX`)
@@ -735,11 +746,7 @@ Toute l'infrastructure est en place. Déclencher les 3 workflows GitHub Actions.
 #### Trigger Deployments
 
 - [ ] **Step 1:** Aller sur le repo GitHub → onglet **Actions**
-- [ ] **Step 2:** Lancer **Deploy API** en premier :
-  - Cliquer **Deploy API** → **Run workflow** → **Run workflow**
-  - Attendre le succès (coche verte) — le workflow build + push l'image dans ECR
-  - App Runner détecte le nouveau tag `:latest` et déclenche automatiquement un déploiement
-  - Vérifier dans **App Runner** → `invoice-api` → onglet **Activity** que le déploiement passe à **Succeeded**
+- [ ] **Step 2:** ~~Deploy API~~ — **déjà lancé en Task 12a** et App Runner a déjà déployé l'image. Vérifier dans **App Runner** → `invoice-api` → onglet **Activity** que le dernier déploiement est **Succeeded**.
 - [ ] **Step 3:** Lancer **Deploy Marketing** :
   - Cliquer **Deploy Marketing** → **Run workflow** → **Run workflow**
   - Attendre le succès
