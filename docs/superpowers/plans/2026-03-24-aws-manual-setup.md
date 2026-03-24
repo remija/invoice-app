@@ -497,20 +497,9 @@ Region: **IAM is global** — navigate to **IAM**
 
 ---
 
-### Task 11: App Runner — VPC Connector
+### Task 11: ~~App Runner — VPC Connector~~
 
-Region: `eu-west-3` — navigate to **App Runner** → **VPC connectors**
-
-> Le VPC connector permet au container App Runner d'accéder à RDS dans le subnet privé, sans exposer RDS à internet.
-
-- [ ] **Step 1:** **App Runner** → **VPC connectors** → **Add new**
-  - Connector name: `invoice-vpc-connector`
-  - VPC: `invoice-vpc`
-  - Subnets: select both **private** subnets (`invoice-private-a`, `invoice-private-b`)
-  - Security groups: select `invoice-apprunner-sg` (created in Task 3)
-  - Click **Add**
-
-**Verify:** VPC connector `invoice-vpc-connector` appears with status **Active**.
+> **Fusionné dans Task 12.** Le VPC connector se crée directement dans l'assistant de création du service App Runner (section Networking). Passer directement à Task 12.
 
 ---
 
@@ -565,10 +554,15 @@ Region: `eu-west-3` — navigate to **App Runner**
   - Path: `/health`
   - Leave other defaults
 
-#### Networking (VPC connector)
+#### Networking (VPC connector — créer ici)
 
 - [ ] **Step 8:** Networking tab → **Custom VPC**:
-  - VPC connector: `invoice-vpc-connector` (created in Task 11)
+  - Cliquer **Add new** (ou **Create VPC connector**) à côté du champ VPC connector
+  - VPC connector name: `invoice-vpc-connector`
+  - VPC: `invoice-vpc`
+  - Subnets: sélectionner les 2 **private** subnets (`invoice-private-a`, `invoice-private-b`)
+  - Security groups: sélectionner `invoice-apprunner-sg` (créé en Task 3)
+  - Cliquer **Add** / **Create** → le connector apparaît sélectionné automatiquement
   - Click **Next**
 
 #### Custom domain
