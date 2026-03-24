@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Provision all AWS resources and GitHub secrets so that `git push` to `main` triggers a working deployment of API (ECS Fargate Spot), App (S3 + CloudFront), and Marketing (S3 + CloudFront).
+**Goal:** Provision all AWS resources and GitHub secrets so that `git push` to `main` triggers a working deployment of API (App Runner), App (S3 + CloudFront), and Marketing (S3 + CloudFront).
 
-**Architecture:** ECS Fargate Spot behind ALB for the NestJS API. Two S3+CloudFront distributions for the static frontends. RDS PostgreSQL in private subnet. Cognito for auth. OIDC federation for GitHub Actions. All infra created manually via AWS console.
+**Architecture:** App Runner for the NestJS API (auto-deploys from ECR, VPC connector for private RDS access). Two S3+CloudFront distributions for the static frontends. RDS PostgreSQL in private subnet. Cognito for auth. OIDC federation for GitHub Actions. All infra created manually via AWS console.
 
 **Tech Stack:** AWS Console (eu-west-3 default, us-east-1 for CloudFront certs), GitHub Settings UI.
 
@@ -27,11 +27,11 @@ Use these exact names throughout to stay consistent with the GitHub Actions work
 | Private subnet A | `10.0.3.0/24` — eu-west-3a |
 | Private subnet B | `10.0.4.0/24` — eu-west-3b |
 | ECR repository | `invoice-api` |
-| ECS cluster | `invoice-cluster` |
-| ECS service | `invoice-api-service` |
-| ECS task def | `invoice-api` |
-| ECS container | `invoice-api` |
-| ECS execution role | `ecsTaskExecutionRole-invoice` |
+| App Runner service | `invoice-api` |
+| App Runner ECR access role | `apprunner-ecr-access-role` |
+| App Runner instance role | `apprunner-instance-role-invoice` |
+| App Runner SG | `invoice-apprunner-sg` |
+| App Runner VPC connector | `invoice-vpc-connector` |
 | IAM deploy role | `github-actions-deploy` |
 | S3 bucket (app) | `invoice-app-frontend` |
 | S3 bucket (marketing) | `invoice-marketing-site` |
@@ -55,10 +55,10 @@ Task 5  → SSM Parameter Store — Cognito values
 Task 6  → RDS PostgreSQL
 Task 7  → SSM Parameter Store — DATABASE_URL
 Task 8  → ECR Repository (repo seulement, pas de push manuel)
-Task 9  → IAM: ECS Task Execution Role
+Task 9  → IAM: App Runner Roles (ECR access role + instance role)
 Task 10 → IAM: GitHub Actions OIDC Provider + Deploy Role
-Task 11 → ALB (Target Group + Listeners)
-Task 12 → ECS Cluster + Task Definition + Service
+Task 11 → App Runner: Security Group + VPC Connector
+Task 12 → App Runner Service
 Task 13 → S3 Buckets
 Task 14 → CloudFront Distributions (needs Task 1 certs validated)
 Task 15 → DNS Records (app CNAMEs)
@@ -72,7 +72,7 @@ Task 17 → First Deployment & Smoke Test
 
 **Start this first.** DNS validation takes 5–30 minutes. You can do other tasks while waiting.
 
-⚠️ CloudFront requires certs in **us-east-1** (global). ALB cert must be in **eu-west-3**.
+⚠️ CloudFront requires certs in **us-east-1** (global). App Runner manages its own TLS cert automatically when you add a custom domain — no manual cert needed for the API.
 
 #### Cert A — us-east-1 (for App CloudFront)
 
@@ -95,15 +95,9 @@ Task 17 → First Deployment & Smoke Test
 - [ ] **Step 9:** DNS validation → **Request** → copy CNAME Name + Value
 - [ ] **Step 10:** Add that CNAME to DNS provider
 
-#### Cert C — eu-west-3 (for ALB)
+> ~~Cert C (eu-west-3, for ALB)~~ — **Not needed.** App Runner auto-provisions an ACM cert for the custom domain when you link it in Task 12. It will give you 2 CNAME records to add to DNS at that point.
 
-- [ ] **Step 11:** Switch console region to `eu-west-3`
-- [ ] **Step 12:** Navigate to **Certificate Manager** → **Request certificate**
-- [ ] **Step 13:** Domain: `invoice-api.remi-jacquart.dev`
-- [ ] **Step 14:** DNS validation → **Request** → copy CNAME Name + Value
-- [ ] **Step 15:** Add that CNAME to DNS provider
-
-> The 3 validation CNAMEs are now live. Continue with the next tasks. Certs will show **"Issued"** status once DNS propagates. Check back before Task 14 (CloudFront needs them validated).
+> The 2 validation CNAMEs are now live. Continue with the next tasks. Certs will show **"Issued"** status once DNS propagates. Check back before Task 14 (CloudFront needs them validated).
 
 ---
 
@@ -165,39 +159,27 @@ Region: `eu-west-3`
 
 Region: `eu-west-3` — navigate to **VPC** → **Security Groups**
 
-#### ALB Security Group
+#### App Runner Security Group
+
+App Runner VPC connector uses this SG to connect outbound to RDS.
 
 - [ ] **Step 1:** **Create security group**
-  - Name: `invoice-alb-sg`
-  - Description: `ALB inbound HTTP and HTTPS`
+  - Name: `invoice-apprunner-sg`
+  - Description: `App Runner VPC connector — outbound to RDS`
   - VPC: `invoice-vpc`
-  - Inbound rules:
-    - Type: HTTPS, Port: 443, Source: `0.0.0.0/0`
-    - Type: HTTP, Port: 80, Source: `0.0.0.0/0`
+  - Inbound rules: **none** (App Runner connects outbound; nothing connects inbound to this SG)
   - Outbound rules: leave default (all traffic)
   - Click **Create security group**
-  - **Note the security group ID** (e.g. `sg-0abc123...`) — needed for ECS SG
-
-#### ECS Security Group
-
-- [ ] **Step 2:** **Create security group**
-  - Name: `invoice-ecs-sg`
-  - Description: `ECS tasks — inbound from ALB only`
-  - VPC: `invoice-vpc`
-  - Inbound rules:
-    - Type: Custom TCP, Port: 3000, Source: **Custom** → paste the `invoice-alb-sg` ID
-  - Outbound rules: leave default (all traffic — ECS needs to reach ECR, SSM, RDS)
-  - Click **Create security group**
-  - **Note the security group ID** — needed for RDS SG
+  - **Note the security group ID** (e.g. `sg-0abc123...`) — needed for RDS SG
 
 #### RDS Security Group
 
-- [ ] **Step 3:** **Create security group**
+- [ ] **Step 2:** **Create security group**
   - Name: `invoice-rds-sg`
-  - Description: `RDS PostgreSQL — inbound from ECS only`
+  - Description: `RDS PostgreSQL — inbound from App Runner only`
   - VPC: `invoice-vpc`
   - Inbound rules:
-    - Type: PostgreSQL, Port: 5432, Source: **Custom** → paste the `invoice-ecs-sg` ID
+    - Type: PostgreSQL, Port: 5432, Source: **Custom** → paste the `invoice-apprunner-sg` ID
   - Outbound rules: leave default
   - Click **Create security group**
 
@@ -334,7 +316,7 @@ Region: `eu-west-3` — navigate to **Systems Manager** → **Parameter Store**
 
 Region: `eu-west-3` — navigate to **ECR**
 
-> Pas besoin de push manuel. Le service ECS sera créé avec `desired count: 0` (Task 12), donc ECS ne tentera pas de puller l'image avant le premier déploiement GitHub Actions (Task 17).
+> Pas besoin de push manuel. App Runner est configuré pour surveiller le tag `:latest` dans ECR (Task 12) et déclenchera automatiquement un déploiement dès que GitHub Actions pushe la première image (Task 17).
 
 - [ ] **Step 1:** **Repositories** → **Create repository**
   - Visibility: **Private**
@@ -346,28 +328,30 @@ Region: `eu-west-3` — navigate to **ECR**
 
 ---
 
-### Task 9: IAM — ECS Task Execution Role
+### Task 9: IAM — App Runner Roles
 
-Region: `eu-west-3` — navigate to **IAM** (IAM is global but SSM resources are regional)
+App Runner a besoin de deux rôles distincts :
+- **ECR Access Role** : utilisé par App Runner pour puller l'image depuis ECR au moment du déploiement
+- **Instance Role** : utilisé par le container en cours d'exécution pour lire SSM
 
-This role allows ECS to pull images from ECR, write logs to CloudWatch, and read secrets from SSM.
-
-#### Create the Role
+#### ECR Access Role
 
 - [ ] **Step 1:** **IAM** → **Roles** → **Create role**
   - Trusted entity: **AWS service**
-  - Use case: **Elastic Container Service** → **Elastic Container Service Task**
+  - Use case: chercher "App Runner" → sélectionner **App Runner** (principal `build.apprunner.amazonaws.com`)
   - Click **Next**
-- [ ] **Step 2:** Add managed policies:
-  - Search and select: `AmazonECSTaskExecutionRolePolicy`
+- [ ] **Step 2:** Add managed policy: `AmazonEC2ContainerRegistryReadOnly` → **Next**
+- [ ] **Step 3:** Role name: `apprunner-ecr-access-role` → **Create role**
+
+#### Instance Role (accès SSM au runtime)
+
+- [ ] **Step 4:** **Roles** → **Create role**
+  - Trusted entity: **AWS service**
+  - Use case: chercher "App Runner" → sélectionner **App Runner Tasks** (principal `tasks.apprunner.amazonaws.com`)
   - Click **Next**
-- [ ] **Step 3:** Role name: `ecsTaskExecutionRole-invoice`
-  - Click **Create role**
-
-#### Add SSM Permissions (Inline Policy)
-
-- [ ] **Step 4:** Open the newly created role → **Add permissions** → **Create inline policy**
-- [ ] **Step 5:** Click **JSON** tab, paste:
+- [ ] **Step 5:** Skip managed policies → **Next**
+- [ ] **Step 6:** Role name: `apprunner-instance-role-invoice` → **Create role**
+- [ ] **Step 7:** Ouvrir le rôle → **Add permissions** → **Create inline policy** → **JSON** :
   ```json
   {
     "Version": "2012-10-17",
@@ -388,14 +372,10 @@ This role allows ECS to pull images from ECR, write logs to CloudWatch, and read
     ]
   }
   ```
-  Replace `<ACCOUNT_ID>` with your actual 12-digit account ID.
-  ⚠️ The `kms:Decrypt` statement is required because the SSM params are **SecureString** (KMS-encrypted). Without it, ECS tasks fail to start with `AccessDeniedException` when fetching secrets.
-- [ ] **Step 6:** Policy name: `invoice-api-ssm-read`
-  - Click **Create policy**
+  Remplacer `<ACCOUNT_ID>`.
+- [ ] **Step 8:** Policy name: `invoice-api-ssm-read` → **Create policy**
 
-**Verify:** The role `ecsTaskExecutionRole-invoice` should have 2 permission policies:
-- `AmazonECSTaskExecutionRolePolicy` (managed)
-- `invoice-api-ssm-read` (inline)
+**Verify:** 2 rôles créés : `apprunner-ecr-access-role` et `apprunner-instance-role-invoice`.
 
 ---
 
@@ -479,24 +459,6 @@ Region: **IAM is global** — navigate to **IAM**
         "Resource": "arn:aws:ecr:eu-west-3:<ACCOUNT_ID>:repository/invoice-api"
       },
       {
-        "Sid": "ECSDescribe",
-        "Effect": "Allow",
-        "Action": [
-          "ecs:DescribeTaskDefinition",
-          "ecs:RegisterTaskDefinition"
-        ],
-        "Resource": "*"
-      },
-      {
-        "Sid": "ECSUpdate",
-        "Effect": "Allow",
-        "Action": [
-          "ecs:UpdateService",
-          "ecs:DescribeServices"
-        ],
-        "Resource": "arn:aws:ecs:eu-west-3:<ACCOUNT_ID>:service/invoice-cluster/invoice-api-service"
-      },
-      {
         "Sid": "S3Objects",
         "Effect": "Allow",
         "Action": [
@@ -524,12 +486,6 @@ Region: **IAM is global** — navigate to **IAM**
         "Action": "cloudfront:CreateInvalidation",
         "Resource": "*"
       },
-      {
-        "Sid": "PassExecutionRole",
-        "Effect": "Allow",
-        "Action": "iam:PassRole",
-        "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole-invoice"
-      }
     ]
   }
   ```
@@ -541,111 +497,93 @@ Region: **IAM is global** — navigate to **IAM**
 
 ---
 
-### Task 11: ALB (Application Load Balancer)
+### Task 11: App Runner — VPC Connector
 
-Region: `eu-west-3` — navigate to **EC2** → **Load Balancers**
+Region: `eu-west-3` — navigate to **App Runner** → **VPC connectors**
 
-#### Target Group (create before ALB)
+> Le VPC connector permet au container App Runner d'accéder à RDS dans le subnet privé, sans exposer RDS à internet.
 
-- [ ] **Step 1:** **EC2** → **Target Groups** → **Create target group**
-  - Target type: **IP addresses**
-  - Target group name: `invoice-api-tg`
-  - Protocol: HTTP, Port: 3000
+- [ ] **Step 1:** **App Runner** → **VPC connectors** → **Add new**
+  - Connector name: `invoice-vpc-connector`
   - VPC: `invoice-vpc`
-  - Health checks:
-    - Protocol: HTTP
-    - Path: `/health`
-    - Healthy threshold: 2
-    - Unhealthy threshold: 3
-    - Timeout: 5s
-    - Interval: 30s
-  - Click **Next** → **Create target group** (no IPs to register yet — ECS registers them automatically)
+  - Subnets: select both **private** subnets (`invoice-private-a`, `invoice-private-b`)
+  - Security groups: select `invoice-apprunner-sg` (created in Task 3)
+  - Click **Add**
 
-#### Load Balancer
-
-- [ ] **Step 2:** **Load Balancers** → **Create load balancer** → **Application Load Balancer**
-  - Name: `invoice-alb`
-  - Scheme: **Internet-facing**
-  - IP address type: IPv4
-  - VPC: `invoice-vpc`
-  - Mappings: select `eu-west-3a` (public-a) and `eu-west-3b` (public-b) subnets
-  - Security groups: remove default, add `invoice-alb-sg`
-- [ ] **Step 3:** Listeners:
-  - **HTTP:80** — Action: Redirect to HTTPS, status 301
-  - **HTTPS:443** — Action: Forward to `invoice-api-tg`
-    - SSL certificate: select the `invoice-api.remi-jacquart.dev` cert from **eu-west-3** (Task 1, Cert C)
-  - Click **Create load balancer**
-- [ ] **Step 4:** Note the **DNS name** of the ALB (e.g. `invoice-alb-xxxx.eu-west-3.elb.amazonaws.com`) — needed in Task 15.
+**Verify:** VPC connector `invoice-vpc-connector` appears with status **Active**.
 
 ---
 
-### Task 12: ECS Cluster + Task Definition + Service
+### Task 12: App Runner Service
 
-Region: `eu-west-3` — navigate to **ECS**
+Region: `eu-west-3` — navigate to **App Runner**
 
-#### Cluster
+> App Runner démarre automatiquement un nouveau déploiement à chaque push du tag `:latest` dans ECR. Pas de gestion de cluster ni de task definition.
 
-- [ ] **Step 1:** **Clusters** → **Create cluster**
-  - Cluster name: `invoice-cluster`
-  - Infrastructure: **AWS Fargate** only (uncheck EC2)
-  - Click **Create**
+#### Créer le service
 
-#### Task Definition
+- [ ] **Step 1:** **App Runner** → **Services** → **Create service**
 
-- [ ] **Step 2:** **Task definitions** → **Create new task definition**
-  - Task definition family: `invoice-api`
-  - Launch type: **Fargate**
-  - Task role: none (leave empty — the task itself doesn't call AWS APIs)
-  - Task execution role: `ecsTaskExecutionRole-invoice`
-  - CPU: 0.25 vCPU
-  - Memory: 0.5 GB
-  - Network mode: awsvpc (default for Fargate)
+#### Source & deployment
 
-- [ ] **Step 3:** **Container** section — Add container:
-  - Container name: `invoice-api`
-  - Image URI: `<ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/invoice-api:latest`
-  - Port mapping: Container port `3000`, Protocol TCP
+- [ ] **Step 2:** Source:
+  - Repository type: **Container registry**
+  - Provider: **Amazon ECR**
+  - Container image URI: `<ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/invoice-api:latest`
+  - ECR access role: `apprunner-ecr-access-role` (created in Task 9)
+- [ ] **Step 3:** Deployment settings:
+  - Deployment trigger: **Automatic** ← App Runner surveille ECR et redéploie à chaque nouveau push
+  - Click **Next**
 
-- [ ] **Step 4:** **Environment variables** (plain text):
+#### Configure service
+
+- [ ] **Step 4:** Service settings:
+  - Service name: `invoice-api`
+  - vCPU: **0.25 vCPU**
+  - Memory: **0.5 GB**
+  - Port: **3000**
+  - Instance role: `apprunner-instance-role-invoice` (created in Task 9)
+
+- [ ] **Step 5:** Environment variables (plain text) — cliquer **Add environment variable** pour chacune :
   | Key | Value |
   |---|---|
   | `NODE_ENV` | `production` |
   | `PORT` | `3000` |
   | `CORS_ORIGIN` | `https://invoice-app.remi-jacquart.dev,https://invoice-marketing.remi-jacquart.dev` |
 
-- [ ] **Step 5:** **Secrets from SSM** (under Environment variables, type = "ValueFrom"):
-  | Key | Value (SSM ARN) |
+- [ ] **Step 6:** Environment variables (SSM) — dans la même section, type **SSM Parameter** :
+  | Key | SSM parameter name |
   |---|---|
-  | `DATABASE_URL` | `arn:aws:ssm:eu-west-3:<ACCOUNT_ID>:parameter/invoice-api/DATABASE_URL` |
-  | `COGNITO_USER_POOL_ID` | `arn:aws:ssm:eu-west-3:<ACCOUNT_ID>:parameter/invoice-api/COGNITO_USER_POOL_ID` |
-  | `COGNITO_CLIENT_ID` | `arn:aws:ssm:eu-west-3:<ACCOUNT_ID>:parameter/invoice-api/COGNITO_CLIENT_ID` |
+  | `DATABASE_URL` | `/invoice-api/DATABASE_URL` |
+  | `COGNITO_USER_POOL_ID` | `/invoice-api/COGNITO_USER_POOL_ID` |
+  | `COGNITO_CLIENT_ID` | `/invoice-api/COGNITO_CLIENT_ID` |
 
-- [ ] **Step 6:** **Log collection** → Enable, driver: `awslogs`, auto-configure (creates log group `/ecs/invoice-api`)
-- [ ] **Step 7:** Click **Create** → task definition revision 1 should appear
+  > App Runner résout les paramètres SSM au démarrage via l'instance role. Pas d'ARN complet nécessaire.
 
-#### Service
+- [ ] **Step 7:** Health check:
+  - Protocol: **HTTP**
+  - Path: `/health`
+  - Leave other defaults
 
-- [ ] **Step 8:** Go to `invoice-cluster` → **Services** → **Create**
-  - Launch type: **Fargate**
-  - Capacity provider strategy: click **Use capacity provider strategy** → **Add capacity provider**
-    - Add `FARGATE_SPOT`, weight 1, base 0
-    - Remove `FARGATE` if it was auto-added
-  - Task definition: `invoice-api` (revision 1)
-  - Service name: `invoice-api-service`
-  - Desired tasks: **0** ← l'image n'existe pas encore dans ECR ; elle sera pushée par GitHub Actions en Task 17
-- [ ] **Step 9:** Networking:
-  - VPC: `invoice-vpc`
-  - Subnets: select both **public** subnets (ECS runs in public subnet, no NAT Gateway needed)
-  - Security group: `invoice-ecs-sg`
-  - Public IP: **Enabled** (required for ECR/SSM access without NAT)
-- [ ] **Step 10:** Load balancing:
-  - Load balancer type: **Application Load Balancer**
-  - Load balancer: `invoice-alb`
-  - Listener: `443:HTTPS`
-  - Target group: `invoice-api-tg`
-- [ ] **Step 11:** Click **Create** → le service apparaît avec **0/0 running** — c'est attendu.
+#### Networking (VPC connector)
 
-**Verify:** Le service `invoice-api-service` existe dans le cluster `invoice-cluster`, statut **Active**, desired count 0. Aucune task ne tente de démarrer.
+- [ ] **Step 8:** Networking tab → **Custom VPC**:
+  - VPC connector: `invoice-vpc-connector` (created in Task 11)
+  - Click **Next**
+
+#### Custom domain
+
+- [ ] **Step 9:** Review & create → Click **Create & deploy**
+  - Le service se crée en ~2 min. Attendre le statut **Running**.
+- [ ] **Step 10:** Dans le service créé → onglet **Custom domains** → **Link domain**
+  - Domain: `invoice-api.remi-jacquart.dev`
+  - Click **Add**
+  - App Runner affiche **2 enregistrements CNAME** à ajouter à votre DNS :
+    - Un pour la validation ACM (sous-domaine `_aws-...`)
+    - Un pour le routage du trafic (`invoice-api.remi-jacquart.dev` → `<hash>.eu-west-3.awsapprunner.com`)
+  - **Copier ces 2 CNAMEs** — ils seront ajoutés en Task 15
+
+**Verify:** Service `invoice-api` statut **Running**. L'URL par défaut `https://<hash>.eu-west-3.awsapprunner.com/health` répond `{"status":"ok"}` (tester dans le navigateur).
 
 ---
 
@@ -732,13 +670,20 @@ Navigate to **CloudFront** (global service)
 
 Add these at your DNS provider (wherever `remi-jacquart.dev` is managed — Cloudflare, OVH, Gandi, etc.).
 
-- [ ] **Step 1:** Add CNAME for API:
+- [ ] **Step 1:** Add the **2 CNAMEs from App Runner** (copied in Task 12 Step 10):
   ```
+  # CNAME 1 — ACM validation (sous-domaine fourni par App Runner)
+  Name:  _aws-acm-<hash>.invoice-api.remi-jacquart.dev
+  Type:  CNAME
+  Value: _<hash>.acm-validations.aws.
+
+  # CNAME 2 — routing
   Name:  invoice-api.remi-jacquart.dev
   Type:  CNAME
-  Value: invoice-alb-xxxx.eu-west-3.elb.amazonaws.com  ← ALB DNS from Task 11
+  Value: <hash>.eu-west-3.awsapprunner.com  ← App Runner default URL from Task 12
   TTL:   300
   ```
+  > App Runner affiche les valeurs exactes dans l'onglet **Custom domains**. Copier-coller depuis là.
 
 - [ ] **Step 2:** Add CNAME for App:
   ```
@@ -796,45 +741,37 @@ Toute l'infrastructure est en place. Déclencher les 3 workflows GitHub Actions.
 #### Trigger Deployments
 
 - [ ] **Step 1:** Aller sur le repo GitHub → onglet **Actions**
-- [ ] **Step 2:** Lancer **Deploy API** en premier (il doit push l'image avant que l'API puisse démarrer) :
+- [ ] **Step 2:** Lancer **Deploy API** en premier :
   - Cliquer **Deploy API** → **Run workflow** → **Run workflow**
-  - Attendre le succès (coche verte) — le workflow build + push l'image dans ECR et met à jour la task definition
-- [ ] **Step 3:** Passer le service ECS à `desired count: 1` :
-  - **ECS** → `invoice-cluster` → **Services** → `invoice-api-service` → **Update**
-  - Desired tasks : **1** → **Update**
-  - Attendre ~2 min que la task atteigne le statut **Running** et que la target group la marque **healthy**
-- [ ] **Step 4:** Lancer **Deploy Marketing** :
+  - Attendre le succès (coche verte) — le workflow build + push l'image dans ECR
+  - App Runner détecte le nouveau tag `:latest` et déclenche automatiquement un déploiement
+  - Vérifier dans **App Runner** → `invoice-api` → onglet **Activity** que le déploiement passe à **Succeeded**
+- [ ] **Step 3:** Lancer **Deploy Marketing** :
   - Cliquer **Deploy Marketing** → **Run workflow** → **Run workflow**
   - Attendre le succès
-- [ ] **Step 5:** Lancer **Deploy App** :
+- [ ] **Step 4:** Lancer **Deploy App** :
   - Cliquer **Deploy App** → **Run workflow** → **Run workflow**
   - Attendre le succès
 
 #### Smoke Tests
 
-- [ ] **Step 6:** Test the API health endpoint:
+- [ ] **Step 5:** Test the API health endpoint:
   ```bash
   curl https://invoice-api.remi-jacquart.dev/health
   ```
   Expected: `{"status":"ok"}`
 
-- [ ] **Step 7:** Test the marketing site:
+- [ ] **Step 6:** Test the marketing site:
   Open `https://invoice-marketing.remi-jacquart.dev` in a browser.
   Expected: Landing page loads with HTTPS, no mixed content warnings.
 
-- [ ] **Step 8:** Test the React app:
+- [ ] **Step 7:** Test the React app:
   Open `https://invoice-app.remi-jacquart.dev` in a browser.
   Expected: "Facture.dev" dashboard loads.
 
-- [ ] **Step 9:** Test SPA routing (React Router):
+- [ ] **Step 8:** Test SPA routing (React Router):
   Navigate to `https://invoice-app.remi-jacquart.dev/nonexistent-route`
   Expected: React app loads (not a 404 error) — confirms the CloudFront custom error response is working.
-
-- [ ] **Step 10:** Verify HTTPS redirect:
-  ```bash
-  curl -I http://invoice-api.remi-jacquart.dev/health
-  ```
-  Expected: `301 Moved Permanently` redirecting to HTTPS.
 
 ---
 
@@ -842,23 +779,23 @@ Toute l'infrastructure est en place. Déclencher les 3 workflows GitHub Actions.
 
 | Task | Resource | Time estimate |
 |------|----------|--------------|
-| 1 | ACM Certificates (3) | 5 min setup + wait for DNS |
+| 1 | ACM Certificates (2 × us-east-1 pour CloudFront) | 5 min setup + wait for DNS |
 | 2 | VPC, subnets, IGW, route table | 10 min |
-| 3 | 3 Security Groups | 5 min |
+| 3 | 2 Security Groups (App Runner + RDS) | 5 min |
 | 4 | Cognito User Pool + App Client | 5 min |
 | 5 | SSM — Cognito params | 3 min |
 | 6 | RDS PostgreSQL | 10 min setup + 10 min wait |
 | 7 | SSM — DATABASE_URL | 2 min |
 | 8 | ECR repository | 2 min |
-| 9 | IAM ECS Task Execution Role | 5 min |
+| 9 | IAM App Runner Roles (ECR access + instance) | 5 min |
 | 10 | IAM OIDC + GitHub deploy role | 10 min |
-| 11 | ALB + target group | 10 min |
-| 12 | ECS cluster + task def + service | 15 min |
+| 11 | App Runner VPC Connector | 3 min |
+| 12 | App Runner Service + custom domain | 10 min |
 | 13 | S3 buckets | 3 min |
 | 14 | CloudFront distributions | 10 min setup + 15 min deploy |
 | 15 | DNS records | 5 min |
 | 16 | GitHub secrets | 5 min |
 | 17 | Smoke tests | 5 min |
-| **Total** | | **~2h (with waits)** |
+| **Total** | | **~1h45 (with waits)** |
 
-**Total AWS monthly cost:** ~4–6 EUR (ECS Fargate Spot ~1.50 €, ALB ~2 €, Route 53 ~0.50 €, everything else free tier).
+**Total AWS monthly cost:** ~3–5 EUR (App Runner ~2–4 € selon usage, RDS db.t3.micro ~15 € ou free tier si première année, CloudFront/S3 quasi-gratuit à faible trafic).
