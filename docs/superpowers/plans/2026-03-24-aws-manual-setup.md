@@ -207,18 +207,40 @@ Region: `eu-west-3` — navigate to **VPC** → **Security Groups**
 
 Region: `eu-west-3` — navigate to **Cognito**
 
+> **Pourquoi pas de client secret ?** Le React SPA appelle Cognito directement depuis le navigateur. Un client secret dans un bundle JS est accessible à n'importe qui via les DevTools — il ne faut donc jamais en générer pour un SPA. L'API NestJS, elle, vérifie les JWT via JWKS (clés publiques) et n'a pas besoin du secret.
+
+#### Créer le User Pool (sans app client dans le wizard)
+
 - [ ] **Step 1:** **Create user pool**
 - [ ] **Step 2:** Sign-in options: select **Email** only → **Next**
 - [ ] **Step 3:** Password policy: keep Cognito defaults → **Next**
-- [ ] **Step 4:** MFA: select **No MFA** (keep simple for now) → **Next**
+- [ ] **Step 4:** MFA: select **No MFA** → **Next**
 - [ ] **Step 5:** Email delivery: select **Send email with Cognito** (free sandbox) → **Next**
 - [ ] **Step 6:** User pool name: `invoice-users`
-  - App client name: `invoice-app-client`
-  - App type: **Public client** (no secret)
-  - Leave all other options default → **Next** → **Create user pool**
-- [ ] **Step 7:** Open the newly created pool → note:
-  - **User pool ID** (format: `eu-west-3_XXXXXXXXX`)
-  - Click **App clients** tab → note the **Client ID** (long hex string)
+  - Dans la section "Initial app client" :
+    - App type : sélectionner **Single-page application** ← ⚠️ clé du problème
+    - (Ce choix désactive automatiquement la génération du client secret)
+    - App client name : `invoice-app-client`
+  - **Next** → **Create user pool**
+
+> **Si l'assistant Cognito ne propose pas le choix SPA ou génère quand même un secret :** ne pas utiliser ce client. Passer à l'étape suivante pour en créer un manuellement.
+
+#### Si le client créé par le wizard a un secret — créer un nouveau client
+
+- [ ] **Step 7 (si nécessaire):** Dans le user pool créé → onglet **App clients** → **Create app client**
+  - App type : **Public client**
+  - App client name : `invoice-app-client-spa`
+  - **Décocher** "Generate client secret" si la case est cochée
+  - Auth flows : laisser les defaults (ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH)
+  - Click **Create app client**
+  - Ignorer (ou supprimer) l'ancien client qui avait un secret
+
+#### Noter les valeurs
+
+- [ ] **Step 8:** Dans le user pool → noter :
+  - **User pool ID** (format : `eu-west-3_XXXXXXXXX`)
+  - Onglet **App clients** → ouvrir `invoice-app-client` (ou `invoice-app-client-spa`) → noter le **Client ID** (longue chaîne hexadécimale)
+  - Vérifier que la ligne **"Client secret"** est absente ou vide — si elle est présente, recommencer avec Step 7.
 
 ---
 
