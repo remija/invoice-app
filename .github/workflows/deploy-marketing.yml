@@ -31,7 +31,7 @@ jobs:
       - run: npm ci
 
       - name: Build marketing site
-        run: npx turbo build --filter=marketing
+        run: npx turbo build --filter=@invoice-app/marketing
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

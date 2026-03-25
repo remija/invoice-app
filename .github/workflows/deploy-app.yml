@@ -36,7 +36,7 @@ jobs:
           VITE_API_URL: https://invoice-api.remi-jacquart.dev
           VITE_COGNITO_USER_POOL_ID: ${{ secrets.VITE_COGNITO_USER_POOL_ID }}
           VITE_COGNITO_CLIENT_ID: ${{ secrets.VITE_COGNITO_CLIENT_ID }}
-        run: npx turbo build --filter=app
+        run: npx turbo build --filter=@invoice-app/app
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
