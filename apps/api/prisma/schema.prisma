@@ -38,9 +38,11 @@ model Client {
   billingAddress  Json
   deliveryAddress Json?
   invoices        Invoice[]
+  deletedAt       DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
+  @@unique([organizationId, siren])
   @@index([organizationId])
 }
 
